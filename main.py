@@ -61,6 +61,21 @@ onehot_titles_matrix = onehot_titles_matrix.toarray()
 print(onehot_titles_matrix.shape)
 print(onehot_titles.get_feature_names())
 
+"""
+TF-IDF cosine similarity
+"""
+tfidf_vectorizer = TfidfVectorizer(min_df = 0, max_df = 1, use_idf = True, stop_words="english")
+features_TFIDF = tfidf_vectorizer.fit_transform(abstract)
+tfidf_matrix = features_TFIDF.toarray()
+
+
+"""
+23-gram co-occurence ONLY USE THIS FOR THE FINAL GO. IT IS VERY VERY COMPUTATIONALLY DEMANDING
+"""
+#one_got_23gram = CountVectorizer(binary = True, stop_words = "english", ngram_range = (2,3))
+#one_got_23gram_matrix = one_got_23gram.fit_transform(abstract)
+
+
 #####co_occurence computation (VERY EXPENSIVE)
 # co_occurance_abstract=np.dot(cv_matrix,np.transpose(cv_matrix))
 # co_occurance_abstract=np.dot(cv_matrix,cv_matrix.T)
@@ -99,6 +114,19 @@ def features(paper1,paper2):
     co_occurence_abstract=np.dot(one_hot_matrix[idx_paper1],one_hot_matrix[idx_paper2].T)
     same_authors=np.dot(onehot_authors_matrix[idx_paper1],onehot_authors_matrix[idx_paper2].T)
     co_occurence_title=np.dot(onehot_titles_matrix[idx_paper1],onehot_titles_matrix[idx_paper2].T)
+
+    #tfidf cosine similarity
+    tf1 = tfidf_matrix[idx_paper1,:]#.toarray() in case tfidf mat is so large that it's stored as a sparse matrix
+    tf2 = tfidf_matrix[idx_paper2,:]#.toarray() in case tfidf mat is so largs that it's stared as a sparse matrix
+    tfidf_sim = np.dot(tf1,tf2)/max((np.linalg.norm(tf1)*np.linalg.norm(tf2)),1e-16)
+
+    multiplied_idf = np.dot(tf1,tf2)
+    tfidf_max = np.amax(multiplied_idf)
+
+    #VERY COMPUTATIONALLY EXPENSIVE
+    #twothree_gram = np.sum(one_got_23gram_matrix[idx_paper1].toarray() * one_got_23gram_matrix[idx_paper2].toarray())
+
+    same_journal = int(name_journal[idx_paper1] == name_journal[idx_paper2])
     try:
         distance=len(nx.shortest_path(G, str(paper1), str(paper2)))
     except:
@@ -116,7 +144,7 @@ def features(paper1,paper2):
         pref_attachement_coef= p
     common_neig=len(sorted(nx.common_neighbors(G, str(paper1), str(paper2))))
     return [co_occurence_abstract,same_authors,co_occurence_title,distance,
-    years_diff,jaccard_coef,adamic_adar_coef,pref_attachement_coef,common_neig] #
+    years_diff,jaccard_coef,adamic_adar_coef,pref_attachement_coef,common_neig,tfidf_sim,tfidf_max,same_journal]#,twothree_gram] #
 
 train_features=[]
 y_train=[]
@@ -267,3 +295,11 @@ clf = clf.fit(train_features, y_train)
 pred = list(clf.predict(test_features))
 success_rate=sum(y_test==pred)/len(pred)
 print("Success_rate with SVM:",success_rate)
+
+# xgboost
+import xgboost as xgb
+xg = xgb.XGBClassifier(max_depth=2,n_estimaters = 200)
+xg.fit(train_features,y_train)
+pred = list(xg.predict(test_features))
+success_rate=sum(ytest==pred)/len(pred)
+print("Success_rate with XGBoost:",success_rate)
