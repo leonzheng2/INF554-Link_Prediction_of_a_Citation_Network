@@ -9,6 +9,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn import preprocessing
 from sklearn import svm
+from sklearn.ensemble import RandomForestClassifier
 
 """
     Possible changes
@@ -77,7 +78,7 @@ G=nx.Graph()
 G.add_nodes_from(ID)
 #adds the corresponding links between the paper (training set), links when link_test==1
 ##we only keep 90% of the set for testing perpose
-for ID_source_train,ID_sink_train,link_train in set[:int(len(set)*testtrain)]:
+for ID_source_train,ID_sink_train,link_train in set[:int(len(set)*testtrain)]: #[:int(len(set)*testtrain)]
     if link_train=="1":
         G.add_edge(ID_source_train,ID_sink_train)
 #G.edges() to print all the edges
@@ -98,6 +99,11 @@ def features(paper1,paper2):
     co_occurence_abstract=np.dot(one_hot_matrix[idx_paper1],one_hot_matrix[idx_paper2].T)
     same_authors=np.dot(onehot_authors_matrix[idx_paper1],onehot_authors_matrix[idx_paper2].T)
     co_occurence_title=np.dot(onehot_titles_matrix[idx_paper1],onehot_titles_matrix[idx_paper2].T)
+    try:
+        distance=len(nx.shortest_path(G, str(paper1), str(paper2)))
+    except:
+        distance=0
+    years_diff=int(year[idx_paper1])-int(year[idx_paper2])
     ## features over the graph
     jaccard = nx.jaccard_coefficient(G, [(str(paper1), str(paper2))])
     for u, v, p in jaccard:
@@ -108,15 +114,15 @@ def features(paper1,paper2):
     pref_attachement = nx.preferential_attachment(G, [(str(paper1), str(paper2))])
     for u, v, p in pref_attachement:
         pref_attachement_coef= p
-
-    return [co_occurence_abstract,same_authors,co_occurence_title,jaccard_coef,adamic_adar_coef,pref_attachement_coef] #
-
+    common_neig=len(sorted(nx.common_neighbors(G, str(paper1), str(paper2))))
+    return [co_occurence_abstract,same_authors,co_occurence_title,distance,
+    years_diff,jaccard_coef,adamic_adar_coef,pref_attachement_coef,common_neig] #
 
 train_features=[]
 y_train=[]
-print("Learning...")
+print("Features costruction for Learning...")
 step=0
-for source,sink,link in set[:int(len(set)*testtrain)]: #
+for source,sink,link in set[:int(len(set)*testtrain)]:
     step+=1
     if step%1000==0:    print("Step:",step,"/",int(len(set)*testtrain))
     train_features.append(features(source,sink))
@@ -126,28 +132,138 @@ train_features = preprocessing.scale(train_features)
 y_train=np.array(y_train)
 
 
-# SVM as model
-classifier = svm.LinearSVC()
-# train the SVM
-classifier.fit(train_features, y_train)
-
-
 test_features=[]
 y_test=[]
-print("Testing...")
+print("Features costruction for Testing...")
 step=0
-for source,sink,link in set[int(len(set)*testtrain):len(set)]: ##
+for source,sink in set[int(len(set)*testtrain):len(set)]: ##set_test: ##
     step+=1
     if step%1000==0:    print("Step:",step,"/",len(set)-int(len(set)*testtrain))
     test_features.append(features(source,sink))
-    y_test.append(link)
+    # y_test.append(link)
 test_features=np.array(test_features)
 test_features = preprocessing.scale(test_features)
-y_test=np.array(y_test)
-test_features = preprocessing.scale(test_features)
+# y_test=np.array(y_test)
 
-# Prediction rate
+#### For kaggle submission
+# with open("data/testing_set.txt", "r") as f:
+#     file =csv.reader(f, delimiter='\t')
+#     set_file=list(file)
+# set_test= [values[0].split(" ") for values in set_file]
+#### than make the changes in the for loops
+# #MLP classsifier
+# features=(0,1,2,4,5,6,7,8)
+# from sklearn.neural_network import MLPClassifier
+# clf = MLPClassifier(solver='adam', alpha=1e-3,
+#             hidden_layer_sizes=(15, 10), random_state=1)
+# clf = clf.fit(train_features[:,features], y_train)
+#
+#
+# pred = list(clf.predict(test_features[:,features]))
+# # ids=[i for i in range(len(set_test))]
+# predictions= zip(range(len(set_test)), pred)
+#
+# # write predictions to .csv file suitable for Kaggle (just make sure to add the column names)
+#
+# with open("predictions.csv","w",newline="") as pred1:
+#     fieldnames = ['id', 'category']
+#     csv_out = csv.writer(pred1)
+#     csv_out.writerow(fieldnames)
+#     for row in predictions:
+#         csv_out.writerow(row)
+#
+# #### scored 0.962876 on 90% 10% split against 0.96630 on kaggle
+
+
+
+
+
+"""
+Model phase (training and testing are in the same paragraphs for one method)
+"""
+
+# Prediction rate with SVM
+classifier = svm.LinearSVC()
+classifier.fit(train_features, y_train)
 pred = list(classifier.predict(test_features))
 success_rate=sum(y_test==pred)/len(pred)
-
 print("Success_rate:",success_rate)
+
+
+#prediction rate with RF
+clf = RandomForestClassifier(n_estimators=10)
+clf = clf.fit(train_features, y_train)
+pred = list(clf.predict(test_features))
+success_rate=sum(y_test==pred)/len(pred)
+print("Success_rate with RF:",success_rate)
+
+
+#prediction using logistic regression
+from sklearn.linear_model import LogisticRegression
+model = LogisticRegression()
+model.fit(train_features, y_train)
+pred = list(model.predict(test_features))
+success_rate=sum(y_test==pred)/len(pred)
+print("Success_rate with Logistic regression:",success_rate)
+
+#MLP classsifier (best so far)
+features=(0,1,2,4,5,6,7,8)
+from sklearn.neural_network import MLPClassifier
+clf = MLPClassifier(solver='adam', alpha=1e-3,
+            hidden_layer_sizes=(15, 10), random_state=1)
+clf = clf.fit(train_features[:,features], y_train)
+pred = list(clf.predict(test_features[:,features]))
+success_rate=sum(y_test==pred)/len(pred)
+print("Success_rate with NN MLP with Adam:",success_rate)
+# #MLP classsifier
+# features=(0,1,2,4,5,6,7,8)
+# from sklearn.neural_network import MLPClassifier
+# clf = MLPClassifier(solver='adam', alpha=1e-3,
+#             hidden_layer_sizes=(15, 10), random_state=1)
+# clf = clf.fit(train_features[:,features], y_train)
+
+
+
+# KNN
+from sklearn.neighbors import KNeighborsClassifier
+clf = KNeighborsClassifier(3)
+clf = clf.fit(train_features, y_train)
+pred = list(clf.predict(test_features))
+success_rate=sum(y_test==pred)/len(pred)
+print("Success_rate with KNN k=3:",success_rate)
+
+
+# AdaBoost
+from sklearn.ensemble import AdaBoostClassifier
+clf = AdaBoostClassifier()
+clf = clf.fit(train_features, y_train)
+pred = list(clf.predict(test_features))
+success_rate=sum(y_test==pred)/len(pred)
+print("Success_rate with AdaBoost:",success_rate)
+
+
+#Gaussian processs
+# from sklearn.gaussian_process import GaussianProcessClassifier
+# from sklearn.gaussian_process.kernels import RBF
+# clf=GaussianProcessClassifier(1.0 * RBF(1.0))
+# clf = clf.fit(train_features, y_train)
+# pred = list(clf.predict(test_features))
+# success_rate=sum(y_test==pred)/len(pred)
+# print("Success_rate with Gaussian process:",success_rate)
+
+
+#Naive Bayes
+from sklearn.naive_bayes import GaussianNB
+clf = GaussianNB()
+clf = clf.fit(train_features, y_train)
+pred = list(clf.predict(test_features))
+success_rate=sum(y_test==pred)/len(pred)
+print("Success_rate with Naive bayes:",success_rate)
+
+# different SVMs
+from sklearn.svm import SVC
+clf = SVC(kernel="rbf")
+clf = clf.fit(train_features, y_train)
+pred = list(clf.predict(test_features))
+success_rate=sum(y_test==pred)/len(pred)
+print("Success_rate with SVM:",success_rate)
